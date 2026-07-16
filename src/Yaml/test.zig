@@ -260,6 +260,76 @@ test "invalid enum" {
     try testing.expectError(Yaml.Error.InvalidEnum, result);
 }
 
+test "trailing comment after plain scalar mapping value" {
+    // A comment terminates a plain scalar: `version` on the next line is the
+    // next mapping key, not a continuation of the `2025-01-01` scalar.
+    const source =
+        \\date: 2025-01-01  # when
+        \\version: "1.0"
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+    try testing.expectEqualStrings("2025-01-01", map.get("date").?.scalar);
+    try testing.expectEqualStrings("1.0", map.get("version").?.scalar);
+}
+
+test "trailing comment after plain scalar in block-sequence mapping" {
+    // Regression: a trailing comment on a `- key: value` line used to swallow
+    // the next line's key into the scalar and fail with ParseFailure.
+    const source =
+        \\extra:
+        \\  major_revisions:
+        \\    - date: 2025-01-01  # when
+        \\      version: "1.0"
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const revs = yaml.docs.items[0].map.get("extra").?.map.get("major_revisions").?.list;
+    try testing.expectEqual(revs.len, 1);
+    try testing.expectEqualStrings("2025-01-01", revs[0].map.get("date").?.scalar);
+    try testing.expectEqualStrings("1.0", revs[0].map.get("version").?.scalar);
+}
+
+test "trailing comment after multi-word plain scalar" {
+    const source =
+        \\title: hello world  # greeting
+        \\next: 1
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+    try testing.expectEqualStrings("hello world", map.get("title").?.scalar);
+    try testing.expectEqualStrings("1", map.get("next").?.scalar);
+}
+
+test "comment-only source yields zero docs without error" {
+    const source =
+        \\# only a comment
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 0);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0
