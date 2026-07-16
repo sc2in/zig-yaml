@@ -537,7 +537,11 @@ fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             .literal => {},
             .space => {
                 const trailing = @intFromEnum(self.token_it.pos) - 2;
-                self.eatCommentsAndSpace(&.{});
+                // Stop at a comment: a comment terminates a plain scalar, so a
+                // literal on the following line is the next mapping key, not a
+                // continuation of this scalar (the comment itself is consumed
+                // later by the callers' unrestricted eatCommentsAndSpace).
+                self.eatCommentsAndSpace(&.{.comment});
                 if (self.token_it.peek()) |peek| {
                     if (peek.id != .literal) {
                         const node_end: Token.Index = @enumFromInt(trailing);
