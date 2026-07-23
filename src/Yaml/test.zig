@@ -330,6 +330,83 @@ test "comment-only source yields zero docs without error" {
     try testing.expectEqual(yaml.docs.items.len, 0);
 }
 
+test "ampersand mid plain-scalar is content, not an anchor" {
+    // Regression (issue #81): `&` is only an anchor indicator at node start.
+    // Mid-scalar it is ordinary content, so this must not fail with
+    // ParseFailure. Same for the multi-`&` case.
+    const source =
+        \\name: foo & bar
+        \\desc: cloud & edge & core
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+    const map = yaml.docs.items[0].map;
+    try testing.expectEqualStrings("foo & bar", map.get("name").?.scalar);
+    try testing.expectEqualStrings("cloud & edge & core", map.get("desc").?.scalar);
+}
+
+test "alias/tag/seq indicators mid plain-scalar are content" {
+    // `*` (alias), `!` (tag) and `- ` (seq item) share the `&` fix: only
+    // indicators at node start, plain content mid-scalar (issue #81).
+    const source =
+        \\a: x * y
+        \\b: x ! y
+        \\c: foo - bar
+        \\d: read & write * always
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+    const map = yaml.docs.items[0].map;
+    try testing.expectEqualStrings("x * y", map.get("a").?.scalar);
+    try testing.expectEqualStrings("x ! y", map.get("b").?.scalar);
+    try testing.expectEqualStrings("foo - bar", map.get("c").?.scalar);
+    try testing.expectEqualStrings("read & write * always", map.get("d").?.scalar);
+}
+
+test "ampersand mid plain-scalar in block-sequence mapping" {
+    // The PolicyPress shape that surfaced issue #81.
+    const source =
+        \\extra:
+        \\  revisions:
+        \\    - description: Initial cloud & edge policy
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+    const revs = yaml.docs.items[0].map.get("extra").?.map.get("revisions").?.list;
+    try testing.expectEqual(revs.len, 1);
+    try testing.expectEqualStrings("Initial cloud & edge policy", revs[0].map.get("description").?.scalar);
+}
+
+test "indicator immediately followed by non-space is still content" {
+    // No space after `&`/`*` — proves the fix is in plain-scalar assembly, not
+    // a tokenizer "indicator only when followed by whitespace" guard.
+    const source =
+        \\name: foo &bar
+        \\also: a *b
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+    const map = yaml.docs.items[0].map;
+    try testing.expectEqualStrings("foo &bar", map.get("name").?.scalar);
+    try testing.expectEqualStrings("a *b", map.get("also").?.scalar);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0
