@@ -535,6 +535,12 @@ fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
                 return node_index.toOptional();
             },
             .literal => {},
+            // `&` (anchor), `*` (alias), `!` (tag) and `- ` (seq item) are only
+            // indicators at the *start* of a node. `leafValue` is only entered
+            // for a leading literal/quoted token, so any such token reached here
+            // is inside a plain scalar and is ordinary content — fold it in
+            // rather than aborting (issue #81; sibling of the 0.3.1 `#` fix).
+            .anchor, .alias, .tag, .seq_item_ind => {},
             .space => {
                 const trailing = @intFromEnum(self.token_it.pos) - 2;
                 // Stop at a comment: a comment terminates a plain scalar, so a
@@ -543,7 +549,7 @@ fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
                 // later by the callers' unrestricted eatCommentsAndSpace).
                 self.eatCommentsAndSpace(&.{.comment});
                 if (self.token_it.peek()) |peek| {
-                    if (peek.id != .literal) {
+                    if (!isPlainContinuation(peek.id)) {
                         const node_end: Token.Index = @enumFromInt(trailing);
                         log.debug("(leaf) {s}", .{self.rawString(node_start, node_end)});
                         self.nodes.set(@intFromEnum(node_index), .{
@@ -576,6 +582,17 @@ fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
     }
 
     return error.MalformedYaml;
+}
+
+/// Tokens that continue a plain scalar once one has begun. A `#` comment is
+/// deliberately excluded (it terminates the scalar); the indicator characters
+/// `&`/`*`/`!`/`- ` are included because they are only meaningful as indicators
+/// at node start, not mid plain-scalar (issue #81).
+fn isPlainContinuation(id: Token.Id) bool {
+    return switch (id) {
+        .literal, .anchor, .alias, .tag, .seq_item_ind => true,
+        else => false,
+    };
 }
 
 fn eatCommentsAndSpace(self: *Parser, comptime exclusions: []const Token.Id) void {
