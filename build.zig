@@ -33,10 +33,8 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(example);
 
     const run_cmd = b.addRunArtifact(example);
+    run_cmd.addPassthruArgs();
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
 
     const run_step = b.step("run", "Run example program parser");
     run_step.dependOn(&run_cmd.step);
@@ -54,5 +52,4 @@ pub fn build(b: *std.Build) void {
     });
     e2e_tests.root_module.addImport("yaml", yaml_module);
     test_step.dependOn(&b.addRunArtifact(e2e_tests).step);
-
 }

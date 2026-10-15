@@ -1,12 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const mem = std.mem;
 const build_options = @import("build_options");
+
 const Yaml = @import("yaml").Yaml;
 
-const mem = std.mem;
-
-var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
-const gpa = gpa_alloc.allocator();
+var safe: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+const gpa = safe.allocator();
 
 const usage =
     \\Usage: yaml <path-to-yaml>

@@ -1,23 +1,23 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.parser);
 const mem = std.mem;
-
 const Allocator = mem.Allocator;
 const ErrorBundle = std.zig.ErrorBundle;
+
+const Tokenizer = @import("Tokenizer.zig");
+const Token = Tokenizer.Token;
+const TokenIterator = Tokenizer.TokenIterator;
+const Tree = @import("Tree.zig");
+const String = Tree.String;
 const LineCol = Tree.LineCol;
 const List = Tree.List;
 const Map = Tree.Map;
 const Node = Tree.Node;
-const Tokenizer = @import("Tokenizer.zig");
-const Token = Tokenizer.Token;
-const TokenIterator = Tokenizer.TokenIterator;
 const TokenWithLineCol = Tree.TokenWithLineCol;
-const Tree = @import("Tree.zig");
-const String = Tree.String;
-const Parser = @This();
 const Yaml = @import("Yaml.zig");
 
+const log = std.log.scoped(.parser);
+const Parser = @This();
 source: []const u8,
 tokens: std.MultiArrayList(TokenWithLineCol) = .empty,
 token_it: TokenIterator = undefined,
@@ -29,7 +29,7 @@ errors: ErrorBundle.Wip,
 
 pub fn init(gpa: Allocator, source: []const u8) Allocator.Error!Parser {
     var self: Parser = .{ .source = source, .errors = undefined };
-    try self.errors.init(gpa);
+    self.errors = try .init(gpa);
     return self;
 }
 
@@ -38,8 +38,8 @@ pub fn deinit(self: *Parser, gpa: Allocator) void {
     self.docs.deinit(gpa);
     self.nodes.deinit(gpa);
     self.extra.deinit(gpa);
-    self.string_bytes.deinit(gpa);
     self.errors.deinit();
+    self.string_bytes.deinit(gpa);
     self.* = undefined;
 }
 
@@ -121,15 +121,15 @@ fn addExtraAssumeCapacity(self: *Parser, extra: anytype) u32 {
     return result;
 }
 
-fn payloadToExtraItems(data: anytype) [@typeInfo(@TypeOf(data)).@"struct".fields.len]u32 {
-    const fields = @typeInfo(@TypeOf(data)).@"struct".fields;
-    var result: [fields.len]u32 = undefined;
-    inline for (&result, fields) |*val, field| {
-        val.* = switch (field.type) {
-            u32 => @field(data, field.name),
-            i32 => @bitCast(@field(data, field.name)),
-            Node.Index, Node.OptionalIndex, Token.Index => @intFromEnum(@field(data, field.name)),
-            else => @compileError("bad field type: " ++ @typeName(field.type)),
+fn payloadToExtraItems(data: anytype) [@typeInfo(@TypeOf(data)).@"struct".field_names.len]u32 {
+    const s = @typeInfo(@TypeOf(data)).@"struct";
+    var result: [s.field_names.len]u32 = undefined;
+    inline for (&result, s.field_names, 0..) |*val, field, i| {
+        val.* = switch (s.field_types[i]) {
+            u32 => @field(data, field),
+            i32 => @bitCast(@field(data, field)),
+            Node.Index, Node.OptionalIndex, Token.Index => @intFromEnum(@field(data, field)),
+            else => |T| @compileError("bad field type: " ++ @typeName(T)),
         };
     }
     return result;

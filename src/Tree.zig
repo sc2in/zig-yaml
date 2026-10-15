@@ -1,9 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
-
 const Allocator = mem.Allocator;
+
 const Token = @import("Tokenizer.zig").Token;
+
 const Tree = @This();
 
 source: []const u8,
@@ -37,15 +38,15 @@ pub fn nodeScope(tree: Tree, node: Node.Index) Node.Scope {
 /// Returns the requested data, as well as the new index which is at the start of the
 /// trailers for the object.
 pub fn extraData(tree: Tree, comptime T: type, index: Extra) struct { data: T, end: Extra } {
-    const fields = std.meta.fields(T);
     var i = @intFromEnum(index);
     var result: T = undefined;
-    inline for (fields) |field| {
-        @field(result, field.name) = switch (field.type) {
+    const s = @typeInfo(T).@"struct";
+    inline for (s.field_names, s.field_types) |name, t| {
+        @field(result, name) = switch (t) {
             u32 => tree.extra[i],
             i32 => @bitCast(tree.extra[i]),
             Node.Index, Node.OptionalIndex, Token.Index => @enumFromInt(tree.extra[i]),
-            else => @compileError("bad field type: " ++ @typeName(field.type)),
+            else => @compileError("bad field type: " ++ @typeName(t)),
         };
         i += 1;
     }
