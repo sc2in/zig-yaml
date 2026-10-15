@@ -38,8 +38,8 @@ pub fn deinit(self: *Parser, gpa: Allocator) void {
     self.docs.deinit(gpa);
     self.nodes.deinit(gpa);
     self.extra.deinit(gpa);
-    self.string_bytes.deinit(gpa);
     self.errors.deinit();
+    self.string_bytes.deinit(gpa);
     self.* = undefined;
 }
 

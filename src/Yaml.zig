@@ -579,6 +579,21 @@ pub const Value = union(enum) {
             => return Value{ .scalar = try std.fmt.allocPrint(arena, "{d}", .{input}) },
 
             .@"struct" => |s| {
+                if (s.is_tuple) {
+                    var list: std.ArrayListUnmanaged(Value) = .empty;
+                    try list.ensureTotalCapacityPrecise(arena, s.field_names.len);
+                    inline for (s.field_names) |name| {
+                        if (try encode(arena, @field(input, name))) |value| {
+                            list.appendAssumeCapacity(value);
+                        } else {
+                            log.debug("Could not encode value in a tuple: {s}", .{name});
+                            return error.CannotEncodeValue;
+                        }
+                    }
+
+                    return Value{ .list = try list.toOwnedSlice(arena) };
+                }
+
                 var map: Map = .empty;
                 try map.ensureTotalCapacity(arena, s.field_names.len);
                 inline for (s.field_names) |name| {
