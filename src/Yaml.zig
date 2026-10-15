@@ -2,17 +2,19 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
-const log = std.log.scoped(.yaml);
-
 const Allocator = mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const ErrorBundle = std.zig.ErrorBundle;
-const Node = Tree.Node;
+
 const Parser = @import("Parser.zig");
 const ParseError = Parser.ParseError;
 const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
 const Tree = @import("Tree.zig");
+const Node = Tree.Node;
+
+const log = std.log.scoped(.yaml);
+
 const Yaml = @This();
 
 source: []const u8,
@@ -152,12 +154,15 @@ fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
 }
 
 fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
-    const union_info = @typeInfo(T).@"union";
+    const u = @typeInfo(T).@"union";
 
-    if (union_info.tag_type) |_| {
-        inline for (union_info.fields) |field| {
-            if (self.parseValue(arena, field.type, value)) |u_value| {
-                return @unionInit(T, field.name, u_value);
+    if (u.tag_type) |_| {
+        inline for (
+            u.field_names,
+            u.field_types,
+        ) |name, typ| {
+            if (self.parseValue(arena, typ, value)) |u_value| {
+                return @unionInit(T, name, u_value);
             } else |err| switch (err) {
                 error.InvalidCharacter => {},
                 error.TypeMismatch => {},
@@ -177,35 +182,35 @@ fn parseOptional(self: Yaml, arena: Allocator, comptime T: type, value: ?Value) 
 }
 
 fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T {
-    const struct_info = @typeInfo(T).@"struct";
+    const s = @typeInfo(T).@"struct";
     var parsed: T = undefined;
 
-    inline for (struct_info.fields) |field| {
-        var value: ?Value = map.get(field.name) orelse blk: {
-            const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
+    inline for (s.field_names, s.field_types, s.field_attrs) |name, typ, attr| {
+        var value: ?Value = map.get(name) orelse blk: {
+            const field_name = try mem.replaceOwned(u8, arena, name, "_", "-");
             break :blk map.get(field_name);
         };
 
-        if (@typeInfo(field.type) == .optional) {
+        if (@typeInfo(typ) == .optional) {
             if (value == null) blk: {
-                const maybe_default_value = field.defaultValue() orelse break :blk;
+                const maybe_default_value = attr.defaultValue(typ) orelse break :blk;
                 value = Value.encode(arena, maybe_default_value) catch break :blk;
             }
-            @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
+            @field(parsed, name) = try self.parseOptional(arena, typ, value);
             continue;
         }
 
-        if (field.defaultValue()) |default_value| {
+        if (attr.defaultValue(typ)) |default_value| {
             if (value == null) blk: {
                 value = Value.encode(arena, default_value) catch break :blk;
             }
         }
 
         const unwrapped = value orelse {
-            log.debug("missing struct field: {s}: {s}", .{ field.name, @typeName(field.type) });
+            log.debug("missing struct field: {s}: {s}", .{ name, @typeName(typ) });
             return error.StructFieldMissing;
         };
-        @field(parsed, field.name) = try self.parseValue(arena, field.type, unwrapped);
+        @field(parsed, name) = try self.parseValue(arena, typ, unwrapped);
     }
 
     return parsed;
@@ -573,24 +578,12 @@ pub const Value = union(enum) {
             .float,
             => return Value{ .scalar = try std.fmt.allocPrint(arena, "{d}", .{input}) },
 
-            .@"struct" => |info| if (info.is_tuple) {
-                var list: std.ArrayListUnmanaged(Value) = .empty;
-                try list.ensureTotalCapacityPrecise(arena, info.fields.len);
-
-                inline for (info.fields) |field| {
-                    if (try encode(arena, @field(input, field.name))) |value| {
-                        list.appendAssumeCapacity(value);
-                    }
-                }
-
-                return Value{ .list = try list.toOwnedSlice(arena) };
-            } else {
+            .@"struct" => |s| {
                 var map: Map = .empty;
-                try map.ensureTotalCapacity(arena, info.fields.len);
-
-                inline for (info.fields) |field| {
-                    if (try encode(arena, @field(input, field.name))) |value| {
-                        const key = try arena.dupe(u8, field.name);
+                try map.ensureTotalCapacity(arena, s.field_names.len);
+                inline for (s.field_names) |name| {
+                    if (try encode(arena, @field(input, name))) |value| {
+                        const key = try arena.dupe(u8, name);
                         map.putAssumeCapacityNoClobber(key, value);
                     }
                 }
@@ -599,9 +592,9 @@ pub const Value = union(enum) {
             },
 
             .@"union" => |info| if (info.tag_type) |tag_type| {
-                inline for (info.fields) |field| {
-                    if (@field(tag_type, field.name) == input) {
-                        return try encode(arena, @field(input, field.name));
+                inline for (info.field_names) |name| {
+                    if (@field(tag_type, name) == input) {
+                        return try encode(arena, @field(input, name));
                     }
                 } else unreachable;
             } else return error.UntaggedUnion,
